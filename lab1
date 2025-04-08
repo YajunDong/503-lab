@@ -1,1 +1,67 @@
-import 
+import pandas as pd
+import numpy as np
+import datetime as dt
+import matplotlib.pyplot as plt
+
+file_path = r'C:\Users\donya727\Downloads\503 lab\Q1data-Lab1.csv'
+df = pd.read_csv(file_path)
+
+# Removes the rows that contain NULL values
+df.dropna()
+print(df.head(5))
+
+# ensure that everything in RET is numeric number, or python cannot do the calculation
+df['RET'] = pd.to_numeric(df['RET'], errors='coerce')
+df_filter = df[df['RET'] > 0.06]
+print(df_filter.head(5))
+
+# mean
+print(df['RET'].mean())
+
+# standard deviation
+print(df['RET'].std())
+
+# time identify
+df['date'] = pd.to_datetime(df['date'])
+df['month'] = df['date'].dt.to_period('M')
+df.head(5)
+
+# Calculate Simple return and continuously compounded return, and first order autocorrelation
+df['SimpleReturn'] = df['RET']
+df['CCR'] = np.log1p(df['SimpleReturn'])
+df['lag1autocc'] = df['RET'].autocorr(lag=1)
+print(df.head(5))
+
+# Calculate market average monthly simple return
+monthlyAvg_Simple=df.groupby('month')['SimpleReturn'].mean().reset_index()
+print(monthlyAvg_Simple)
+
+# Calculate market average continuously compounded return
+monthlyAvg_CCR=df.groupby('month')['CCR'].mean().reset_index()
+print(monthlyAvg_CCR)
+
+# Add Year Group for 4-year period
+monthlyAvg_Simple['year'] = monthlyAvg_Simple['month'].dt.year
+monthlyAvg_Simple['year'] = monthlyAvg_Simple['month'].astype(str).str[:4].astype(int)
+monthlyAvg_Simple['year_group']=((monthlyAvg_Simple['year']-monthlyAvg_Simple['year'].min())//4)
+
+# Calculate each 4-year group’s mean simple return
+avg_by_group = monthlyAvg_Simple.groupby('year_group')['SimpleReturn'].mean().reset_index()
+avg_by_group.rename(columns={'SimpleReturn':'simple_return_mean'},inplace=True)
+print(avg_by_group)
+
+# Create year Range for each group
+base_year = 2000
+avg_by_group['Year_Range'] = (
+    (base_year + avg_by_group['year_group'] * 4).astype(str)
+    + '-' +
+    (base_year + avg_by_group['year_group'] * 4+3).astype(str)
+)
+print(avg_by_group)
+
+# Export your filtered data to a csv
+output_path = r'C:\Users\donya727\Downloads\503 lab\dr.CSV'
+df.to_csv(output_path, index=[False])
+
+# Summary Statistics
+df[['CCR','SimpleReturn','CCR','lag1autocc']].describe()
