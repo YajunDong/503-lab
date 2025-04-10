@@ -1,0 +1,370 @@
+#pip install pandas numpy matplotlib statsmodels
+import pandas as pd
+import statsmodels.api as sm
+import numpy as np
+import matplotlib.pyplot as plt
+
+# import data
+file_path =r'C:\Users\yu151\Desktop\clab1-2\calculationforamihud2020-2022.csv'
+df = pd.read_csv(file_path)
+df.head(5)
+
+# 2.Data Cleaning Since CRSP data included missing value. For RET, they are -66, -77，-88，-99
+df['date'] = pd.to_datetime(df['date'])
+df['RET'] = pd.to_numeric(df['RET'], errors='coerce')
+df['PRC'] = pd.to_numeric(df['PRC'], errors='coerce')
+df['VOL'] = pd.to_numeric(df['VOL'], errors='coerce')
+#drop the row with wrong number
+df = df[df["RET"] != -66.0]
+df = df[df["RET"] != -77.0]
+df = df[df["RET"] != -88.0]
+df = df[df["RET"] != -99.0]
+df.head()
+
+''' Question 2:  3.Create Amihud Illiquidity for each stock each day
+Amihud illiquidity= ((absolute value of Return)/(vol*PRC))*10^6
+high amihud value --->illiquidity
+low amihud value---->liquidity 
+converse impact'''
+df['DOLLAR_VOL'] = df['VOL'] * df['PRC'].abs()
+df['amihud_daily'] = df['RET'].abs() / df['DOLLAR_VOL']*(10**6)
+df.head()
+
+# 4.Groupby and obtain monthly Amihud Illiquidity for each stock
+df['month'] = df['date'].dt.to_period('M')
+df = df[df['DOLLAR_VOL'] > 0]###only keep dollar volume rows   abs_ret_div_dollarvol
+# calculate Amihud illiquidity group by month and permno
+amihud_illiq = df.groupby(['PERMNO', 'month'])['amihud_daily'].mean().reset_index()
+amihud_illiq.rename(columns={'amihud_daily': 'Amihud_Illiquidity'}, inplace=True)
+amihud_illiq.head(5)
+
+'''5.Create quintiles for Each year based on Amihud Illiquidity
+for each year, we divided sotck for 5 quintiles, top 20% stocks month with lowest Amihud Illiquidity at Q1, 
+20% stock month with second lowest Amihud Illiquidity at Q2, etc. '''
+amihud_illiq['illiquidity_quintile'] = amihud_illiq.groupby('month')['Amihud_Illiquidity']\
+    .transform(lambda x: pd.qcut(x, 5, labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5']))
+##lamba x is a temporary def, x here is all Amihud illuidity at a month. qcut divide the input x into 5 quintiles.
+amihud_illiq.head(5)
+#merged_df_Amihud_RET.tail(5)
+
+'''6.Calculate each quintile's average Amihud illiquity
+ensure no outliers
+[1,2,3,.....,96,97,98,99,100] to [2,2,3......,98,99,99]
+'''
+from scipy.stats.mstats import winsorize
+#winsorize
+amihud_values = amihud_illiq['Amihud_Illiquidity'].values
+amihud_winsorized = winsorize(amihud_values, limits=[0.01, 0.01])
+amihud_illiq['Amihud_Illiquidity_winsorized'] = amihud_winsorized
+#calculate each quintile's average Amihud_Illiquidity
+avg_illiquidity_by_quintile = amihud_illiq.groupby('illiquidity_quintile')['Amihud_Illiquidity_winsorized'].mean()
+print(avg_illiquidity_by_quintile)
+
+'''7.Important Each firm's monthly return'''
+#firstly, show current dataframe
+amihud_illiq.head()
+import numpy as np
+file_path =r'C:\Users\yu151\Desktop\clab1-2\2020-2022MonthlyReturn.csv'
+df_MRET = pd.read_csv(file_path)
+#set date
+df_MRET['date'] = pd.to_datetime(df_MRET['date'])
+df_MRET['month'] = df_MRET['date'].dt.to_period('M')
+#data clean
+df_MRET['RET'] = pd.to_numeric(df_MRET['RET'], errors='coerce')
+df_MRET = df_MRET[df_MRET["RET"] != -66.0]
+df_MRET = df_MRET[df_MRET["RET"] != -77.0]
+df_MRET = df_MRET[df_MRET["RET"] != -88.0]
+df_MRET =df_MRET[df_MRET["RET"] != -99.0]
+df_MRET['monthly_return']=df_MRET['RET']
+df_MRET['monthly_log_return'] = np.log(1 + df_MRET['RET'])
+df_MRET.head(5)
+
+'''8.merge Monthly_log_return to Amihud and Quintile, groupby month and permno'''
+merged_df_Amihud_MRET = pd.merge(df_MRET, amihud_illiq, on=[ 'month','PERMNO'], how='inner')
+#when both two dataframe have same moth and permno, the row will be keep
+merged_df_Amihud_MRET.head(5)
+
+'''9.import ff3 and CAPM factors'''
+file_path =r'C:\Users\yu151\Desktop\clab1-2\FF3-CAPM-factors.csv'
+df_factor = pd.read_csv(file_path)
+df_factor['date'] = pd.to_datetime(df_factor['date'])
+df_factor['month'] = df_factor['date'].dt.to_period('M')
+df_factor.head(5)
+
+'''10.merge month ff3 and CAPM factors to Monthly_log_return and Amihud and Quintile, groupby month'''
+merged_df_Amihud_MRET_ff3 = pd.merge(df_factor, merged_df_Amihud_MRET, on=[ 'month'], how='inner')
+merged_df_Amihud_MRET_ff3.head(5)
+
+'''11.This is our data set for final analysis, we can save this to csv'''
+merged_df_Amihud_MRET_ff3.to_csv(r'C:\Users\yu151\Desktop\clab1-2\merged_df_Amihud_MRET_ff3.csv', index=False)
+
+'''12. calculate monthly equal-weighted return
+we already get the monthly return for each stock, so we can just calculate equal-weighted return for each month
+Equal-weighted return is the average return of a portfolio where each stock is assigned the same weight, regardless of its market capitalization.
+equal weighted return is for the market, not the single stocks。'''
+import pandas as pd
+file_path = r"C:\Users\yu151\Desktop\clab1-2\merged_df_Amihud_MRET_ff3.csv"
+df_all = pd.read_csv(file_path)
+# each month equal-weighted return
+equal_weighted_returns = (
+    df_all.groupby("month")["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "equal_weighted_return"})
+)
+print(equal_weighted_returns.head())
+
+'''13. summary statistics for monthly equal-weighted return'''
+equal_weighted_returns.describe()
+
+'''14. eqch quintile equal weighted return
+Q1 means the higher illiquidity'''
+equal_weighted_returns_q = (
+    df_all.groupby("illiquidity_quintile")["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "equal_weighted_return_q"})
+)
+print(equal_weighted_returns_q)
+
+'''15.calculate CAPM alpha for each stock each month
+R_it - R_ft = α_i + β_i (R_mt - R_ft) + ε_t
+'''
+import pandas as pd
+import statsmodels.api as sm
+
+# ---------- 1. generate「each month × each quintile」equal weight return----------
+port_rets = (
+    df_all
+    .groupby(["month", "illiquidity_quintile"])["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "port_return"})
+)  #new dataFrame
+
+
+#merge to ff3 factors-- extract "month", "Mkt-RF", "RF" from df_all, drop the duplicate to ensure each month only have once.
+#a new dataframe called factors
+factors = df_all[["month", "Mkt-RF", "RF"]].drop_duplicates()
+
+#convert from fraction to decimal
+factors[["Mkt-RF","RF"]] = factors[["Mkt-RF","RF"]] / 100
+
+
+#merge dataframe port_rets and factors
+port_rets = port_rets.merge(factors, on="month", how="left")
+
+#calculate excess return
+port_rets["excess_return"] = port_rets["port_return"] - port_rets["RF"]
+
+# ---------- do regression each quintile ----------
+results = []
+
+for q in port_rets["illiquidity_quintile"].unique():
+    sub = port_rets[port_rets["illiquidity_quintile"] == q].sort_values("month") #ensure time-serise 
+    X = sm.add_constant(sub["Mkt-RF"])
+    y = sub["excess_return"]
+
+    res = sm.OLS(y, X).fit()
+
+    results.append({
+        "quintile"     : q,
+        "alpha"        : res.params["const"],
+        "alpha_tstat"  : res.tvalues["const"],
+        "beta"         : res.params["Mkt-RF"],
+        "n_obs"        : len(sub)
+    })
+alpha_df = pd.DataFrame(results).sort_values("quintile")
+print(alpha_df)
+
+'''16.difference between bottom and top quintile
+we are testing, if the excess return most liquidity portfolio  - the least liquidity portfolio significant.
+p=9.3%, significant，
+
+'''
+import pandas as pd
+import statsmodels.api as sm
+
+#generate「each month × each quintile」ew return
+port_rets = (
+    df_all
+    .groupby(["month", "illiquidity_quintile"])["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "port_return"})
+)
+
+#  convert to wide table 
+wide = port_rets.pivot(index="month",
+                       columns="illiquidity_quintile",
+                       values="port_return")
+
+wide["long_short"] = wide["Q1"] - wide["Q5"]      # Q1 − Q5
+
+# 3. merge ff3 factors 
+factors = df_all[["month", "Mkt-RF", "RF"]].drop_duplicates()
+ls_df   = wide.reset_index().merge(factors, on="month", how="left")
+
+# 4. calculate excess return
+ls_df["excess_ls"] = ls_df["long_short"] - ls_df["RF"]
+
+# 5. CAPM regression 
+X = sm.add_constant(ls_df["Mkt-RF"])
+y = ls_df["excess_ls"]
+#R_it - R_ft = α_i + β_i (R_mt - R_ft) + ε_t
+
+model = sm.OLS(y, X).fit(cov_type="HAC", cov_kwds={"maxlags":12})  # hac：heteroskedasticity and Autocorrelation Consistent
+###for ensureing the accuarcy of t value
+print(model.summary())
+
+
+'''17.calculate ff3 alpha for each stock each month
+(R_it - R_ft) = α_i + β_i (R_mt - R_ft) + s_i · SMB_t + h_i · HML_t + ε_t
+'''
+import pandas as pd
+import statsmodels.api as sm
+
+#generate「each month × each quintile」ew return
+port_rets = (
+    df_all
+    .groupby(["month", "illiquidity_quintile"])["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "port_return"})
+)
+
+# ---------- 2. merge Fama-French 3  ----------
+factors = df_all[["month", "Mkt-RF", "RF", "smb", "hml"]].drop_duplicates()
+
+#convert to decimal
+factors[["Mkt-RF", "RF", "smb", "hml"]] = factors[["Mkt-RF", "RF", "smb", "hml"]] / 100
+
+port_rets = port_rets.merge(factors, on="month", how="left")
+
+#excess return
+port_rets["excess_return"] = port_rets["port_return"] - port_rets["RF"]
+
+# ff3 regression for each quintile 
+results = []
+
+for q in port_rets["illiquidity_quintile"].unique():
+    sub = port_rets[port_rets["illiquidity_quintile"] == q].sort_values("month")
+
+    X = sub[["Mkt-RF", "smb", "hml"]]
+    X = sm.add_constant(X)
+    y = sub["excess_return"]
+
+    res = sm.OLS(y, X).fit()
+
+    results.append({
+        "quintile"     : q,
+        "alpha"        : res.params["const"],
+        "alpha_tstat"  : res.tvalues["const"],
+        "beta_mkt"     : res.params["Mkt-RF"],
+        "beta_smb"     : res.params["smb"],
+        "beta_hml"     : res.params["hml"],
+        "n_obs"        : len(sub)
+    })
+
+alpha_df_ff3 = pd.DataFrame(results).sort_values("quintile")
+print(alpha_df_ff3)
+
+
+'''18.difference between bottom and top quintile'''
+import pandas as pd
+import statsmodels.api as sm
+
+# #generate「each month × each quintile」ew return
+port_rets = (
+    df_all
+    .groupby(["month", "illiquidity_quintile"])["monthly_return"]
+    .mean()
+    .reset_index()
+    .rename(columns={"monthly_return": "port_return"})
+)
+
+# ---------- 2. wide table, and calculate（Q1 − Q5） 
+wide = port_rets.pivot(index="month",
+                       columns="illiquidity_quintile",
+                       values="port_return")
+
+wide["long_short"] = wide["Q1"] - wide["Q5"]
+
+# ---------- 3. merge Fama-French 3  ----------
+factors = df_all[["month", "Mkt-RF", "RF", "smb", "hml"]].drop_duplicates()
+
+# convert to decimal
+factors[["Mkt-RF", "RF", "smb", "hml"]] = factors[["Mkt-RF", "RF", "smb", "hml"]] / 100
+
+ls_df = wide.reset_index().merge(factors, on="month", how="left")
+
+# ---------- 4. excess return for q1-q5 ----------
+ls_df["excess_ls"] = ls_df["long_short"] - ls_df["RF"]
+
+# 5. FF3 regression（includes Newey-West HAC） 
+X = ls_df[["Mkt-RF", "smb", "hml"]]
+X = sm.add_constant(X)
+y = ls_df["excess_ls"]
+
+model = sm.OLS(y, X).fit(cov_type="HAC", cov_kwds={"maxlags":12})  # 使用 Newey-West 校正
+print(model.summary())
+
+
+
+'''Figure 1'''
+
+df = pd.read_csv(r'C:\Users\yu151\Desktop\clab1-2\merged_df_Amihud_MRET_ff3.csv')
+
+df['month'] = pd.to_datetime(df['month'])
+
+# generate「each month × each quintile」ew return
+group_ret = (df
+             .groupby(['month', 'illiquidity_quintile'])['monthly_return']
+             .mean()                # equal weighted mean
+             .unstack()             # (row to column, colum q1-q5)
+             .reindex(columns=['Q1','Q2','Q3','Q4','Q5'])  # 
+             .sort_index())
+
+# long（HIGH-ILLIQ），short（LOW-ILLIQ）
+group_ret['HIGH-ILLIQ']            = group_ret['Q5']      # Long 
+group_ret['LOW-ILLIQ']             = group_ret['Q1']      # Short 
+group_ret['HIGH ILLIQ-LOW ILLIQ']  = group_ret['Q5'] - group_ret['Q1']
+
+# 
+market = (df[['month', 'monthly_log_return']]
+          .drop_duplicates('month')
+          .set_index('month')
+          .sort_index()
+          ['monthly_log_return']                #use montly log return
+          .pipe(lambda s: np.exp(s) - 1)        # log → simple
+          .rename('Benchmark'))
+
+# merge
+wide = group_ret.join(market, how='left')
+
+wide = wide.fillna(0).clip(lower=-0.99) 
+
+import matplotlib.pyplot as plt
+#monthly return line
+cum_ret = (1 + wide).cumprod() - 1
+
+#cum_ret = np.log1p(wide).cumsum()  ##log cumulative return
+
+plt.figure(figsize=(10, 6))
+
+plot_cols = ['HIGH-ILLIQ',          # long
+             'LOW-ILLIQ',           # short
+             'HIGH ILLIQ-LOW ILLIQ',# long-short
+             'Benchmark']           # market
+
+for col in plot_cols:
+    plt.plot(cum_ret.index, cum_ret[col], label=col)
+
+plt.title('Figure 1. Cumulative Returns to Illiquidity Trading Strategy')
+plt.xlabel('Date')
+plt.ylabel('Cumulative Return')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
